@@ -1,65 +1,152 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChatPanel } from "@/components/chat-panel";
+import { ConversationSidebar } from "@/components/conversation-sidebar";
+import { DashboardPanel } from "@/components/dashboard-panel";
+import type { ChatMessage, Conversation, DashboardStats, Role } from "@/lib/app-types";
+
+function createMessage(role: Role, content: string): ChatMessage {
+  return { id: crypto.randomUUID(), role, content };
+}
 
 export default function Home() {
+  const [conversationId, setConversationId] = useState<string>();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [stats, setStats] = useState<DashboardStats>();
+  const abortRef = useRef<AbortController | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const canSend = useMemo(() => input.trim().length > 0 && !isStreaming, [input, isStreaming]);
+
+  async function refreshConversations() {
+    const response = await fetch("/api/conversations", { cache: "no-store" });
+    const data = await response.json();
+    setConversations(data.conversations ?? []);
+  }
+
+  async function refreshDashboard() {
+    const response = await fetch("/api/dashboard", { cache: "no-store" });
+    setStats(await response.json());
+  }
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void refreshConversations();
+      void refreshDashboard();
+    });
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  async function loadConversation(id: string) {
+    if (isStreaming) return;
+
+    const response = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
+    const data = await response.json();
+
+    setConversationId(id);
+    setMessages(
+      (data.messages ?? []).map((message: { id: string; role: Role; content: string }) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+      })),
+    );
+  }
+
+  function newConversation() {
+    abortRef.current?.abort();
+    setConversationId(undefined);
+    setMessages([]);
+    setInput("");
+  }
+
+  function cancelConversation() {
+    abortRef.current?.abort();
+  }
+
+  async function sendMessage() {
+    const trimmed = input.trim();
+    if (!trimmed || isStreaming) return;
+
+    const userMessage = createMessage("user", trimmed);
+    const assistantMessage = createMessage("assistant", "");
+    const nextMessages = [...messages, userMessage];
+
+    setMessages([...nextMessages, assistantMessage]);
+    setInput("");
+    setIsStreaming(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conversationId, messages: nextMessages }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok || !response.body) throw new Error("Chat request failed");
+
+      const nextConversationId = response.headers.get("x-conversation-id");
+      if (nextConversationId) setConversationId(nextConversationId);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let output = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        output += decoder.decode(value, { stream: true });
+        setMessages([...nextMessages, { ...assistantMessage, content: output }]);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setMessages([
+          ...nextMessages,
+          { ...assistantMessage, content: error instanceof Error ? error.message : "Request failed" },
+        ]);
+      }
+    } finally {
+      setIsStreaming(false);
+      abortRef.current = null;
+      void refreshConversations();
+      void refreshDashboard();
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="min-h-screen bg-slate-100 text-slate-950">
+      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-4 p-4 lg:grid-cols-[280px_1fr_360px]">
+        <ConversationSidebar
+          activeConversationId={conversationId}
+          conversations={conversations}
+          isStreaming={isStreaming}
+          onNewConversation={newConversation}
+          onSelectConversation={(id) => void loadConversation(id)}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+        <ChatPanel
+          canSend={canSend}
+          input={input}
+          isStreaming={isStreaming}
+          messages={messages}
+          messagesEndRef={messagesEndRef}
+          onCancel={cancelConversation}
+          onInputChange={setInput}
+          onSend={() => void sendMessage()}
+        />
+        <DashboardPanel stats={stats} />
+      </div>
+    </main>
   );
 }
