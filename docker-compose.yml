@@ -1,0 +1,43 @@
+name: spann
+
+services:
+  app:
+    build: .
+    container_name: spann-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DOCKER_DATABASE_URL}
+      LLM_PROVIDER: ${LLM_PROVIDER}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_BASE_URL: ${DOCKER_LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LOG_INGEST_API_KEY: ${LOG_INGEST_API_KEY}
+      MAX_PROMPT_CHARS: ${MAX_PROMPT_CHARS}
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: spann-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: spann
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spann"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
