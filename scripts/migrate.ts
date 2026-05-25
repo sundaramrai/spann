@@ -22,6 +22,7 @@ create table if not exists chat_messages (
 
 create table if not exists inference_logs (
   id uuid primary key default gen_random_uuid(),
+  request_id uuid,
   conversation_id uuid not null references conversations(id) on delete cascade,
   message_id text,
   provider text not null,
@@ -40,10 +41,24 @@ create table if not exists inference_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists ingestion_events (
+  id uuid primary key default gen_random_uuid(),
+  request_id uuid,
+  status text not null default 'pending' check (status in ('pending', 'processed', 'failed')),
+  payload jsonb not null,
+  error_message text,
+  received_at timestamptz not null default now(),
+  processed_at timestamptz
+);
+
+alter table inference_logs add column if not exists request_id uuid;
+
 create index if not exists chat_messages_conversation_created_idx on chat_messages(conversation_id, created_at);
 create index if not exists inference_logs_created_idx on inference_logs(created_at desc);
+create index if not exists inference_logs_request_id_idx on inference_logs(request_id);
 create index if not exists inference_logs_provider_model_idx on inference_logs(provider, model);
 create index if not exists inference_logs_status_idx on inference_logs(status);
+create index if not exists ingestion_events_status_received_idx on ingestion_events(status, received_at);
 `;
 
 async function main() {
