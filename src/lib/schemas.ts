@@ -12,7 +12,10 @@ export const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema).min(1).max(24),
 });
 
+export const dashboardWindowSchema = z.coerce.number().int().positive().max(168).default(24);
+
 export const inferenceLogSchema = z.object({
+  requestId: z.uuid().optional(),
   conversationId: z.uuid(),
   messageId: z.string().min(1).optional(),
   provider: z.string().min(1),
