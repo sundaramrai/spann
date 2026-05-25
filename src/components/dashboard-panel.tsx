@@ -87,6 +87,7 @@ export function DashboardPanel({
                 </div>
                 <div className={log.status === "error" ? "text-red-300" : "text-emerald-300"}>{log.status}</div>
                 <div className="mt-1 line-clamp-2 text-slate-400">{log.input_preview}</div>
+                {log.error_message ? <div className="mt-2 line-clamp-3 text-red-300">{log.error_message}</div> : null}
               </div>
             ))}
             {stats?.recentLogs.length ? null : <p className="text-sm text-slate-400">No logs yet.</p>}
