@@ -17,9 +17,6 @@ services:
       MAX_PROMPT_CHARS: ${MAX_PROMPT_CHARS}
     ports:
       - "3000:3000"
-    volumes:
-      - .:/app
-      - /app/node_modules
 
   postgres:
     image: postgres:16-alpine
