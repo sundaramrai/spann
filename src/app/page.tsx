@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatPanel } from "@/components/chat-panel";
 import { ConversationSidebar } from "@/components/conversation-sidebar";
 import { DashboardPanel } from "@/components/dashboard-panel";
@@ -10,6 +10,15 @@ function createMessage(role: Role, content: string): ChatMessage {
   return { id: crypto.randomUUID(), role, content };
 }
 
+function setConversationUrl(id?: string, replace = false) {
+  const url = id ? `/?id=${encodeURIComponent(id)}` : "/";
+  if (replace) {
+    globalThis.history.replaceState(null, "", url);
+  } else {
+    globalThis.history.pushState(null, "", url);
+  }
+}
+
 export default function Home() {
   const [conversationId, setConversationId] = useState<string>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -17,40 +26,29 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [stats, setStats] = useState<DashboardStats>();
+  const [dashboardWindow, setDashboardWindow] = useState(24);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const canSend = useMemo(() => input.trim().length > 0 && !isStreaming, [input, isStreaming]);
 
-  async function refreshConversations() {
+  const refreshConversations = useCallback(async () => {
     const response = await fetch("/api/conversations", { cache: "no-store" });
     const data = await response.json();
     setConversations(data.conversations ?? []);
-  }
-
-  async function refreshDashboard() {
-    const response = await fetch("/api/dashboard", { cache: "no-store" });
-    setStats(await response.json());
-  }
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void refreshConversations();
-      void refreshDashboard();
-    });
   }, []);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const refreshDashboard = useCallback(async (windowHours = dashboardWindow) => {
+    const response = await fetch(`/api/dashboard?windowHours=${windowHours}`, { cache: "no-store" });
+    setStats(await response.json());
+  }, [dashboardWindow]);
 
-  async function loadConversation(id: string) {
-    if (isStreaming) return;
-
+  const loadConversation = useCallback(async (id: string, updateUrl = true) => {
     const response = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
     const data = await response.json();
 
     setConversationId(id);
+    if (updateUrl) setConversationUrl(id);
     setMessages(
       (data.messages ?? []).map((message: { id: string; role: Role; content: string }) => ({
         id: message.id,
@@ -58,17 +56,66 @@ export default function Home() {
         content: message.content,
       })),
     );
-  }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void refreshConversations();
+      void refreshDashboard();
+    });
+  }, [dashboardWindow, refreshConversations, refreshDashboard]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(globalThis.location.search).get("id");
+    if (id) queueMicrotask(() => void loadConversation(id, false));
+
+    function handlePopState() {
+      const nextId = new URLSearchParams(globalThis.location.search).get("id");
+      if (nextId) {
+        void loadConversation(nextId, false);
+      } else {
+        setConversationId(undefined);
+        setMessages([]);
+      }
+    }
+
+    globalThis.addEventListener("popstate", handlePopState);
+    return () => globalThis.removeEventListener("popstate", handlePopState);
+  }, [loadConversation]);
 
   function newConversation() {
     abortRef.current?.abort();
     setConversationId(undefined);
     setMessages([]);
     setInput("");
+    setConversationUrl();
   }
 
   function cancelConversation() {
     abortRef.current?.abort();
+  }
+
+  async function deleteConversation(id: string) {
+    if (isStreaming) return;
+    const conversation = conversations.find((item) => item.id === id);
+    const confirmed = globalThis.confirm(`Delete "${conversation?.title ?? "this conversation"}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    const response = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+    if (!response.ok) return;
+
+    setConversations((current) => current.filter((conversation) => conversation.id !== id));
+    if (id === conversationId) {
+      setConversationId(undefined);
+      setMessages([]);
+      setInput("");
+      setConversationUrl();
+    }
+    void refreshDashboard(dashboardWindow);
   }
 
   async function sendMessage() {
@@ -94,10 +141,16 @@ export default function Home() {
         signal: controller.signal,
       });
 
-      if (!response.ok || !response.body) throw new Error("Chat request failed");
+      if (!response.ok || !response.body) {
+        const errorPayload = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(errorPayload?.error ?? "Chat request failed");
+      }
 
       const nextConversationId = response.headers.get("x-conversation-id");
-      if (nextConversationId) setConversationId(nextConversationId);
+      if (nextConversationId) {
+        setConversationId(nextConversationId);
+        if (!conversationId) setConversationUrl(nextConversationId);
+      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -121,17 +174,18 @@ export default function Home() {
       setIsStreaming(false);
       abortRef.current = null;
       void refreshConversations();
-      void refreshDashboard();
+      void refreshDashboard(dashboardWindow);
     }
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-950">
-      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-4 p-4 lg:grid-cols-[280px_1fr_360px]">
+    <main className="h-screen overflow-hidden bg-[#090b10] text-slate-100">
+      <div className="grid h-screen w-full grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[300px_minmax(0,1fr)_380px]">
         <ConversationSidebar
           activeConversationId={conversationId}
           conversations={conversations}
           isStreaming={isStreaming}
+          onDeleteConversation={(id) => void deleteConversation(id)}
           onNewConversation={newConversation}
           onSelectConversation={(id) => void loadConversation(id)}
         />
@@ -145,7 +199,11 @@ export default function Home() {
           onInputChange={setInput}
           onSend={() => void sendMessage()}
         />
-        <DashboardPanel stats={stats} />
+        <DashboardPanel
+          stats={stats}
+          windowHours={dashboardWindow}
+          onWindowChange={(value) => setDashboardWindow(value)}
+        />
       </div>
     </main>
   );
