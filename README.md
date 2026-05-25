@@ -68,13 +68,19 @@ Other compatible providers work by changing the same four values.
 
 ## Docker Compose
 
-Keep Ollama running on the host, then run:
+For a production-style local demo, keep Ollama running on the host, then run:
 
 ```bash
 docker compose up --build
 ```
 
 The app container uses `DOCKER_LLM_BASE_URL` to reach Ollama on the host and `DOCKER_DATABASE_URL` to reach the Compose PostgreSQL service. The image builds the Next.js app, runs migrations, then starts `next start`.
+
+For Docker-based development with bind mounts and hot reload, run:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
 
 ## Environment Variables
 
