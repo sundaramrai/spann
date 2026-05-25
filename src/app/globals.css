@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f1f5f9;
-  --foreground: #020617;
+  --background: #090b10;
+  --foreground: #e8edf5;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
@@ -10,6 +10,7 @@
 
 * {
   box-sizing: border-box;
+  border-radius: 0 !important;
 }
 
 html,
@@ -26,4 +27,8 @@ body {
 button,
 textarea {
   font: inherit;
+}
+
+button {
+  cursor: pointer;
 }
